@@ -17,9 +17,9 @@ conn.autocommit = True
 def get_registered_plate(plate_number):
     cursor = conn.cursor()
     query = """
-    SELECT id, plate_number, owner_name, status, access_type
+    SELECT id, "Номер автомобиля", "Владелец", "Статус", "Тип доступа"
     FROM registered_plates
-    WHERE plate_number = %s
+    WHERE "Номер автомобиля" = %s
     """
 
     cursor.execute(query, (plate_number,))
@@ -41,7 +41,7 @@ def get_registered_plate(plate_number):
 def save_access_event(plate_number, camera_name, direction, decision, reason):
     cursor = conn.cursor()
     query = """
-    INSERT INTO access_events (plate_number, camera_name, direction, decision, reason)
+    INSERT INTO access_events ("Номер автомобиля", "Камера", "Направление", "Решение", "Причина")
     VALUES (%s, %s, %s, %s, %s)
     """
 
@@ -49,6 +49,51 @@ def save_access_event(plate_number, camera_name, direction, decision, reason):
         query,
         (plate_number, camera_name, direction, decision, reason),
     )
+    cursor.close()
+
+
+def get_vehicle_on_territory(plate_id):
+    cursor = conn.cursor()
+    query = """
+    SELECT "id", "id_номера", "Время въезда", "Камера"
+    FROM vehicles_on_territory
+    WHERE "id_номера" = %s
+    """
+
+    cursor.execute(query, (plate_id,))
+    row = cursor.fetchone()
+    cursor.close()
+
+    if row is None:
+        return None
+
+    return {
+        "id": row[0],
+        "plate_id": row[1],
+        "entry_time": row[2],
+        "camera_name": row[3],
+    }
+
+
+def add_vehicle_on_territory(plate_id, camera_name):
+    cursor = conn.cursor()
+    query = """
+    INSERT INTO vehicles_on_territory ("id_номера", "Камера")
+    VALUES (%s, %s)
+    """
+
+    cursor.execute(query, (plate_id, camera_name))
+    cursor.close()
+
+
+def remove_vehicle_from_territory(plate_id):
+    cursor = conn.cursor()
+    query = """
+    DELETE FROM vehicles_on_territory
+    WHERE "id_номера" = %s
+    """
+
+    cursor.execute(query, (plate_id,))
     cursor.close()
 
 

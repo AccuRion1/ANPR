@@ -1,6 +1,12 @@
 import time
 
-from core.database import get_registered_plate, save_access_event
+from core.database import (
+    add_vehicle_on_territory,
+    get_registered_plate,
+    get_vehicle_on_territory,
+    remove_vehicle_from_territory,
+    save_access_event,
+)
 
 
 EVENT_COOLDOWN_SECONDS = 5
@@ -36,16 +42,27 @@ def _remember_result(plate_number, camera_name, direction, result):
     }
 
 
-def check_access(plate_number, camera_name="main_camera", direction="entry"):
+def _build_result(plate_number, decision, reason, owner_name=None, status=None, access_type=None):
+    return {
+        "plate_number": plate_number,
+        "decision": decision,
+        "reason": reason,
+        "owner_name": owner_name,
+        "status": status,
+        "access_type": access_type,
+    }
+
+
+def check_access(plate_number, camera_name="Основная камера", direction="въезд"):
     plate_number = (plate_number or "").strip().upper()
-    direction = (direction or "entry").strip().lower()
-    camera_name = (camera_name or "main_camera").strip()
+    direction = (direction or "въезд").strip().lower()
+    camera_name = (camera_name or "Основная камера").strip()
 
     if not plate_number:
         return {
             "plate_number": "",
-            "decision": "denied",
-            "reason": "plate_not_recognized",
+            "decision": "запрещен",
+            "reason": "номер не распознан",
             "owner_name": None,
             "status": None,
             "access_type": None,
@@ -60,45 +77,86 @@ def check_access(plate_number, camera_name="main_camera", direction="entry"):
     plate_record = get_registered_plate(plate_number)
 
     if plate_record is None:
-        result = {
-            "plate_number": plate_number,
-            "decision": "denied",
-            "reason": "plate_not_found",
-            "owner_name": None,
-            "status": None,
-            "access_type": None,
-        }
+        result = _build_result(
+            plate_number=plate_number,
+            decision="запрещен",
+            reason="номер не найден",
+        )
     else:
         status = (plate_record["status"] or "").strip().lower()
         access_type = (plate_record["access_type"] or "").strip().lower()
+        owner_name = plate_record["owner_name"]
 
-        if status != "active":
-            result = {
-                "plate_number": plate_number,
-                "decision": "denied",
-                "reason": f"status_{status or 'inactive'}",
-                "owner_name": plate_record["owner_name"],
-                "status": plate_record["status"],
-                "access_type": plate_record["access_type"],
-            }
-        elif access_type not in {"allowed", "guest"}:
-            result = {
-                "plate_number": plate_number,
-                "decision": "denied",
-                "reason": f"access_type_{access_type or 'denied'}",
-                "owner_name": plate_record["owner_name"],
-                "status": plate_record["status"],
-                "access_type": plate_record["access_type"],
-            }
+        if status != "активен":
+            result = _build_result(
+                plate_number=plate_number,
+                decision="запрещен",
+                reason=f"статус: {status or 'неактивен'}",
+                owner_name=owner_name,
+                status=plate_record["status"],
+                access_type=plate_record["access_type"],
+            )
+        elif access_type not in {"разрешен", "гость"}:
+            result = _build_result(
+                plate_number=plate_number,
+                decision="запрещен",
+                reason=f"тип доступа: {access_type or 'запрещен'}",
+                owner_name=owner_name,
+                status=plate_record["status"],
+                access_type=plate_record["access_type"],
+            )
         else:
-            result = {
-                "plate_number": plate_number,
-                "decision": "allowed",
-                "reason": "guest_access" if access_type == "guest" else "registered_plate",
-                "owner_name": plate_record["owner_name"],
-                "status": plate_record["status"],
-                "access_type": plate_record["access_type"],
-            }
+            vehicle_on_territory = get_vehicle_on_territory(plate_record["id"])
+
+            if direction == "въезд":
+                if vehicle_on_territory is not None:
+                    result = _build_result(
+                        plate_number=plate_number,
+                        decision="запрещен",
+                        reason="автомобиль уже находится на территории",
+                        owner_name=owner_name,
+                        status=plate_record["status"],
+                        access_type=plate_record["access_type"],
+                    )
+                else:
+                    add_vehicle_on_territory(plate_record["id"], camera_name)
+                    result = _build_result(
+                        plate_number=plate_number,
+                        decision="разрешен",
+                        reason="въезд разрешен",
+                        owner_name=owner_name,
+                        status=plate_record["status"],
+                        access_type=plate_record["access_type"],
+                    )
+            elif direction == "выезд":
+                if vehicle_on_territory is None:
+                    result = _build_result(
+                        plate_number=plate_number,
+                        decision="запрещен",
+                        reason="автомобиль отсутствует на территории",
+                        owner_name=owner_name,
+                        status=plate_record["status"],
+                        access_type=plate_record["access_type"],
+                    )
+                else:
+                    remove_vehicle_from_territory(plate_record["id"])
+                    result = _build_result(
+                        plate_number=plate_number,
+                        decision="разрешен",
+                        reason="выезд разрешен",
+                        owner_name=owner_name,
+                        status=plate_record["status"],
+                        access_type=plate_record["access_type"],
+                    )
+            else:
+                result = _build_result(
+                    plate_number=plate_number,
+                    decision="запрещен",
+                    reason="неизвестное направление",
+                    owner_name=owner_name,
+                    status=plate_record["status"],
+                    access_type=plate_record["access_type"],
+                )
 
     save_access_event(
         plate_number=result["plate_number"],

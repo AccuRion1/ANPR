@@ -6,7 +6,7 @@ from core.OCR import recognize_plate
 from core.access_control import check_access
 
 
-def process_frame(frame, camera_name="main_camera", direction="entry"):
+def process_frame(frame, camera_name="Основная камера", direction="въезд"):
 
     boxes = detect_plates(frame)
 
@@ -25,7 +25,7 @@ def process_frame(frame, camera_name="main_camera", direction="entry"):
         if processed_plate is not None:
             cv2.imshow(f"Processed Plate", processed_plate)
 
-        status_text = "UNREADABLE"
+        status_text = "НЕ РАСПОЗНАН"
         box_color = (0, 255, 255)
 
         if plate_number:
@@ -34,16 +34,24 @@ def process_frame(frame, camera_name="main_camera", direction="entry"):
                 camera_name=camera_name,
                 direction=direction,
             )
-            status_text = access_result["decision"].upper()
-            box_color = (0, 255, 0) if access_result["decision"] == "allowed" else (0, 0, 255)
+            status_text = access_result["decision"]#.upper()
+            box_color = (0, 255, 0) if access_result["decision"] == "разрешен" else (0, 0, 255)
 
         dark_frame[y1:y2, x1:x2] = frame[y1:y2, x1:x2]
 
         cv2.rectangle(dark_frame, (x1, y1), (x2, y2), box_color, 2)
 
+        display_status = status_text
+        display_plate = plate_number or "UNREADABLE"
+
+        if status_text == "разрешен":
+            display_status = "ALLOWED"
+        elif status_text == "запрещен":
+            display_status = "DENIED"
+
         cv2.putText(
             dark_frame,
-            plate_number or "UNREADABLE",
+            display_plate,
             (x1, y1-10),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.9,
@@ -53,7 +61,7 @@ def process_frame(frame, camera_name="main_camera", direction="entry"):
 
         cv2.putText(
             dark_frame,
-            status_text,
+            display_status,
             (x1, y2 + 30),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.8,
@@ -63,7 +71,7 @@ def process_frame(frame, camera_name="main_camera", direction="entry"):
 
     return dark_frame
 
-def handle_plate_number(plate_number, camera_name="main_camera", direction="entry"):
+def handle_plate_number(plate_number, camera_name="Основная камера", direction="въезд"):
     if not plate_number:
         return None
     result = check_access(
@@ -72,4 +80,3 @@ def handle_plate_number(plate_number, camera_name="main_camera", direction="entr
         direction=direction,
     )
     return result["decision"]
-    return "Разрешен" if ok else "Запрещен"

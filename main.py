@@ -10,7 +10,7 @@ from core.pipeline import process_frame
 #yolo_model = YOLO("models/yolov8_plate.pt")
 #reader = easyocr.Reader(['en'])
 
-def process_image(path, camera_name="image_source", direction="entry"):
+def process_image(path, camera_name="Изображение", direction="въезд"):
 
     image = cv2.imread(path)
 
@@ -21,7 +21,7 @@ def process_image(path, camera_name="image_source", direction="entry"):
     cv2.destroyAllWindows()
 
 
-def process_video(path, camera_name="video_source", direction="entry"):
+def process_video(path, camera_name="Видео", direction="въезд"):
 
     cap = cv2.VideoCapture(path)
 
@@ -41,7 +41,7 @@ def process_video(path, camera_name="video_source", direction="entry"):
     cv2.destroyAllWindows()
 
 
-def process_camera(camera_index=0, camera_name="webcam_0", direction="entry"):
+def process_camera(camera_index=0, camera_name="Веб-камера 0", direction="въезд"):
 
     cap = cv2.VideoCapture(camera_index)
 
@@ -66,11 +66,11 @@ if __name__ == "__main__":
     mode = input("Выберите режим (image / video / camera): ")
 
     if mode == "image":
-        process_image("test_images/car2.jpg", camera_name="image_source", direction="entry")
+        process_image("test_images/car1.jpg", camera_name="Изображение", direction="выезд")
 
     elif mode == "video":
         path = input("Путь к видео: ")
-        process_video(path, camera_name="video_source", direction="entry")
+        process_video(path, camera_name="Видео", direction="въезд")
 
     elif mode == "camera":
-        process_camera(camera_name="webcam_0", direction="entry")
+        process_camera(camera_name="Веб-камера 0", direction="въезд")

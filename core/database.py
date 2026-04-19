@@ -32,7 +32,7 @@ def get_registered_plate(plate_number):
     return {
         "id": row[0],
         "plate_number": row[1],
-        "owner_name": row[2],
+        "owner_id": row[2],
         "status": row[3],
         "access_type": row[4],
     }
@@ -55,9 +55,9 @@ def save_access_event(plate_number, camera_name, direction, decision, reason):
 def get_vehicle_on_territory(plate_id):
     cursor = conn.cursor()
     query = """
-    SELECT "id", "id_номера", "Время въезда", "Камера"
+    SELECT "id", "Номер автомобиля", "Время въезда"
     FROM vehicles_on_territory
-    WHERE "id_номера" = %s
+    WHERE "Номер автомобиля" = %s
     """
 
     cursor.execute(query, (plate_id,))
@@ -71,18 +71,17 @@ def get_vehicle_on_territory(plate_id):
         "id": row[0],
         "plate_id": row[1],
         "entry_time": row[2],
-        "camera_name": row[3],
     }
 
 
-def add_vehicle_on_territory(plate_id, camera_name):
+def add_vehicle_on_territory(plate_id):
     cursor = conn.cursor()
     query = """
-    INSERT INTO vehicles_on_territory ("id_номера", "Камера")
-    VALUES (%s, %s)
+    INSERT INTO vehicles_on_territory ("Номер автомобиля")
+    VALUES (%s)
     """
 
-    cursor.execute(query, (plate_id, camera_name))
+    cursor.execute(query, (plate_id,))
     cursor.close()
 
 
@@ -90,7 +89,7 @@ def remove_vehicle_from_territory(plate_id):
     cursor = conn.cursor()
     query = """
     DELETE FROM vehicles_on_territory
-    WHERE "id_номера" = %s
+    WHERE "Номер автомобиля" = %s
     """
 
     cursor.execute(query, (plate_id,))

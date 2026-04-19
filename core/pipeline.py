@@ -14,7 +14,16 @@ def process_frame(frame, camera_name="Основная камера", direction=
 
     for (x1, y1, x2, y2) in boxes:
 
-        plate = frame[y1:y2, x1:x2]
+        frame_height, frame_width = frame.shape[:2]
+        pad_x = max(10, int((x2 - x1) * 0.14))
+        pad_y = max(6, int((y2 - y1) * 0.20))
+
+        crop_x1 = max(0, x1 - pad_x)
+        crop_y1 = max(0, y1 - pad_y)
+        crop_x2 = min(frame_width, x2 + pad_x)
+        crop_y2 = min(frame_height, y2 + pad_y)
+
+        plate = frame[crop_y1:crop_y2, crop_x1:crop_x2]
 
         #plate = straighten_plate(plate)
 

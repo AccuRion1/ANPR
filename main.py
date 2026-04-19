@@ -66,7 +66,7 @@ if __name__ == "__main__":
     mode = input("Выберите режим (image / video / camera): ")
 
     if mode == "image":
-        process_image("test_images/car1.jpg", camera_name="Изображение", direction="выезд")
+        process_image("test_images/car9.jpg", camera_name="Изображение", direction="выезд")
 
     elif mode == "video":
         path = input("Путь к видео: ")

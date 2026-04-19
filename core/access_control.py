@@ -42,12 +42,12 @@ def _remember_result(plate_number, camera_name, direction, result):
     }
 
 
-def _build_result(plate_number, decision, reason, owner_name=None, status=None, access_type=None):
+def _build_result(plate_number, decision, reason, owner_id=None, status=None, access_type=None):
     return {
         "plate_number": plate_number,
         "decision": decision,
         "reason": reason,
-        "owner_name": owner_name,
+        "owner_id": owner_id,
         "status": status,
         "access_type": access_type,
     }
@@ -63,7 +63,7 @@ def check_access(plate_number, camera_name="Основная камера", dire
             "plate_number": "",
             "decision": "запрещен",
             "reason": "номер не распознан",
-            "owner_name": None,
+            "owner_id": None,
             "status": None,
             "access_type": None,
             "event_logged": False,
@@ -85,23 +85,23 @@ def check_access(plate_number, camera_name="Основная камера", dire
     else:
         status = (plate_record["status"] or "").strip().lower()
         access_type = (plate_record["access_type"] or "").strip().lower()
-        owner_name = plate_record["owner_name"]
+        owner_id = plate_record["owner_id"]
 
         if status != "активен":
             result = _build_result(
                 plate_number=plate_number,
                 decision="запрещен",
                 reason=f"статус: {status or 'неактивен'}",
-                owner_name=owner_name,
+                owner_id=owner_id,
                 status=plate_record["status"],
                 access_type=plate_record["access_type"],
             )
-        elif access_type not in {"разрешен", "гость"}:
+        elif access_type not in {"сотрудник", "гость"}:
             result = _build_result(
                 plate_number=plate_number,
                 decision="запрещен",
                 reason=f"тип доступа: {access_type or 'запрещен'}",
-                owner_name=owner_name,
+                owner_id=owner_id,
                 status=plate_record["status"],
                 access_type=plate_record["access_type"],
             )
@@ -114,17 +114,17 @@ def check_access(plate_number, camera_name="Основная камера", dire
                         plate_number=plate_number,
                         decision="запрещен",
                         reason="автомобиль уже находится на территории",
-                        owner_name=owner_name,
+                        owner_id=owner_id,
                         status=plate_record["status"],
                         access_type=plate_record["access_type"],
                     )
                 else:
-                    add_vehicle_on_territory(plate_record["id"], camera_name)
+                    add_vehicle_on_territory(plate_record["id"])
                     result = _build_result(
                         plate_number=plate_number,
                         decision="разрешен",
                         reason="въезд разрешен",
-                        owner_name=owner_name,
+                        owner_id=owner_id,
                         status=plate_record["status"],
                         access_type=plate_record["access_type"],
                     )
@@ -134,7 +134,7 @@ def check_access(plate_number, camera_name="Основная камера", dire
                         plate_number=plate_number,
                         decision="запрещен",
                         reason="автомобиль отсутствует на территории",
-                        owner_name=owner_name,
+                        owner_id=owner_id,
                         status=plate_record["status"],
                         access_type=plate_record["access_type"],
                     )
@@ -144,7 +144,7 @@ def check_access(plate_number, camera_name="Основная камера", dire
                         plate_number=plate_number,
                         decision="разрешен",
                         reason="выезд разрешен",
-                        owner_name=owner_name,
+                        owner_id=owner_id,
                         status=plate_record["status"],
                         access_type=plate_record["access_type"],
                     )
@@ -153,7 +153,7 @@ def check_access(plate_number, camera_name="Основная камера", dire
                     plate_number=plate_number,
                     decision="запрещен",
                     reason="неизвестное направление",
-                    owner_name=owner_name,
+                    owner_id=owner_id,
                     status=plate_record["status"],
                     access_type=plate_record["access_type"],
                 )

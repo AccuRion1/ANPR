@@ -109,7 +109,9 @@ def _repair_candidate(candidate):
     if len(candidate) >= 7:
         coerced = list(candidate)
         for index in range(min(len(coerced), 9)):
-            if index in {1, 2, 3, 6, 7, 8} and not coerced[index].isdigit():
+            if index in {1, 2, 3, 6, 7, 8}:
+                if coerced[index].isdigit():
+                    continue
                 coerced[index] = DIGIT_SLOT_REPLACEMENTS.get(coerced[index], coerced[index])
         add_unique("".join(coerced))
 
@@ -148,6 +150,9 @@ def _repair_region_code(candidate):
     repaired = []
 
     if len(region) == 3:
+        if region in VALID_REGION_CODES:
+            return [candidate]
+
         if region[1:] in VALID_REGION_CODES:
             repaired.append(body + region[1:])
 

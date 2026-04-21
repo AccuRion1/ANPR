@@ -98,3 +98,50 @@ def remove_vehicle_from_territory(plate_id):
 
 def check_plate_in_db(plate_number):
     return get_registered_plate(plate_number) is not None
+
+
+def get_access_events(limit=100):
+    """Получает журнал событий из БД."""
+    cursor = conn.cursor()
+    query = """
+    SELECT "Номер автомобиля", "Камера", "Направление", "Решение", "Причина", "Время события"
+    FROM access_events
+    ORDER BY "Время события" DESC
+    LIMIT %s
+    """
+    cursor.execute(query, (limit,))
+    rows = cursor.fetchall()
+    cursor.close()
+    return rows
+
+
+def get_all_plates_with_owners():
+    """Получает все номера с ФИ владельца из таблицы employees."""
+    cursor = conn.cursor()
+    query = """
+    SELECT rp."Номер автомобиля", rp."Статус", rp."Тип доступа", 
+           COALESCE(e."Фамилия" || ' ' || e."Имя", 'Неизвестно') AS owner_name
+    FROM registered_plates rp
+    LEFT JOIN employees e ON rp."Владелец" = e."id"
+    ORDER BY rp."Номер автомобиля"
+    """
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    cursor.close()
+    return rows
+
+
+def add_plate(plate_number, owner_id, status, access_type):
+    """Добавляет новый номер в БД."""
+    cursor = conn.cursor()
+    query = """
+    INSERT INTO registered_plates ("Номер автомобиля", "Владелец", "Статус", "Тип доступа")
+    VALUES (%s, %s, %s, %s)
+    """
+    try:
+        cursor.execute(query, (plate_number, owner_id, status, access_type))
+        cursor.close()
+        return True
+    except Exception as e:
+        cursor.close()
+        return False

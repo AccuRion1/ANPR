@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QLabel, QFileDia
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import QTimer
 import cv2
-from main import process_frame  # импортируем твою функцию обработки кадра
+from main import process_frame
 
 class PlateApp(QWidget):
     def __init__(self):
@@ -65,9 +65,6 @@ class PlateApp(QWidget):
         qt_image = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
         self.image_label.setPixmap(QPixmap.fromImage(qt_image))
 
-        # Здесь можно вывести распознанный номер
-        # Например, собрать из process_frame глобальную переменную или изменить функцию
-        # self.result_text.setText("Распознанный номер: " + plate_number)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

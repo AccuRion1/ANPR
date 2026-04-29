@@ -104,7 +104,8 @@ def get_access_events(limit=100):
     """Получает журнал событий из БД."""
     cursor = conn.cursor()
     query = """
-    SELECT "Номер автомобиля", "Камера", "Направление", "Решение", "Причина", "Время события"
+    SELECT "Номер автомобиля", "Камера", "Направление", "Решение", "Причина", 
+           TO_CHAR("Время события", 'YYYY-MM-DD HH24:MI:SS') AS "Время события"
     FROM access_events
     ORDER BY "Время события" DESC
     LIMIT %s
@@ -145,3 +146,59 @@ def add_plate(plate_number, owner_id, status, access_type):
     except Exception as e:
         cursor.close()
         return False
+
+
+def update_plate(plate_number, owner_id, status, access_type):
+    """Обновляет существующий номер в БД."""
+    cursor = conn.cursor()
+    query = """
+    UPDATE registered_plates
+    SET "Владелец" = %s, "Статус" = %s, "Тип доступа" = %s
+    WHERE "Номер автомобиля" = %s
+    """
+    try:
+        cursor.execute(query, (owner_id, status, access_type, plate_number))
+        cursor.close()
+        return True
+    except Exception as e:
+        cursor.close()
+        return False
+
+
+def delete_plate(plate_number):
+    """Удаляет номер из БД."""
+    cursor = conn.cursor()
+    query = """
+    DELETE FROM registered_plates
+    WHERE "Номер автомобиля" = %s
+    """
+    try:
+        cursor.execute(query, (plate_number,))
+        cursor.close()
+        return True
+    except Exception as e:
+        cursor.close()
+        return False
+
+
+def get_plate_by_number(plate_number):
+    """Получает данные номера по номеру автомобиля."""
+    cursor = conn.cursor()
+    query = """
+    SELECT "Номер автомобиля", "Владелец", "Статус", "Тип доступа"
+    FROM registered_plates
+    WHERE "Номер автомобиля" = %s
+    """
+    cursor.execute(query, (plate_number,))
+    row = cursor.fetchone()
+    cursor.close()
+    
+    if row is None:
+        return None
+    
+    return {
+        "plate_number": row[0],
+        "owner_id": row[1],
+        "status": row[2],
+        "access_type": row[3],
+    }

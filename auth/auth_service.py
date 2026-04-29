@@ -7,7 +7,7 @@ def authenticate_user(login: str, password: str) -> Optional[str]:
     """Аутентифицирует пользователя и возвращает session_id если успешно."""
     cursor = conn.cursor()
     query = """
-    SELECT u.id, u.password, r.role
+    SELECT u.id, u.password, r.role, u.login
     FROM users u
     JOIN roles r ON u.role_id = r.id
     WHERE u.login = %s
@@ -17,8 +17,8 @@ def authenticate_user(login: str, password: str) -> Optional[str]:
     cursor.close()
 
     if row and verify_password(password, row[1]):
-        user_id, _, role = row
-        session_id = session_manager.create_session(user_id, role)
+        user_id, _, role, username = row
+        session_id = session_manager.create_session(user_id, role, username)
         return session_id
     return None
 

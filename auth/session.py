@@ -3,12 +3,12 @@ from typing import Dict, Optional
 
 class SessionManager:
     def __init__(self):
-        self.sessions: Dict[str, Dict] = {}  # session_id -> {'user_id': int, 'role': str}
+        self.sessions: Dict[str, Dict] = {}  # session_id -> {'user_id': int, 'role': str, 'username': str}
 
-    def create_session(self, user_id: int, role: str) -> str:
+    def create_session(self, user_id: int, role: str, username: str = "") -> str:
         """Создает новую сессию и возвращает session_id."""
         session_id = str(uuid.uuid4())
-        self.sessions[session_id] = {'user_id': user_id, 'role': role}
+        self.sessions[session_id] = {'user_id': user_id, 'role': role, 'username': username}
         return session_id
 
     def get_session(self, session_id: str) -> Optional[Dict]:

@@ -6,11 +6,22 @@ from core.OCR import recognize_plate
 from core.access_control import check_access
 
 
-def process_frame(frame, camera_name="Основная камера", direction="въезд"):
+def process_frame(
+    frame,
+    camera_name="Основная камера",
+    direction="въезд",
+    realtime=False,
+    max_plates=None,
+):
 
-    boxes = detect_plates(frame)
+    boxes = detect_plates(
+        frame,
+        max_plates=max_plates if max_plates is not None else (1 if realtime else None),
+        realtime=realtime,
+    )
 
     dark_frame = (frame * 0.35).astype("uint8")
+    detected_plate = None
 
     for (x1, y1, x2, y2) in boxes:
 
@@ -28,11 +39,14 @@ def process_frame(frame, camera_name="Основная камера", direction=
         #plate = straighten_plate(plate)
 
         # получаем и текст, и обработанное изображение
-        plate_number, processed_plate = recognize_plate(plate)
+        plate_number, processed_plate = recognize_plate(plate, fast_mode=realtime)
+        
+        if not detected_plate and plate_number:
+            detected_plate = plate_number
 
-        # 🔥 показать обработанный номер
-        if processed_plate is not None:
-            cv2.imshow(f"Processed Plate", processed_plate)
+        # показать обработанный номер
+        #if processed_plate is not None:
+        #    cv2.imshow(f"Processed Plate", processed_plate)
 
         status_text = "НЕ РАСПОЗНАН"
         box_color = (0, 255, 255)
@@ -78,7 +92,7 @@ def process_frame(frame, camera_name="Основная камера", direction=
             2
         )
 
-    return dark_frame
+    return dark_frame, detected_plate
 
 def handle_plate_number(plate_number, camera_name="Основная камера", direction="въезд"):
     if not plate_number:

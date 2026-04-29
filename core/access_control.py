@@ -9,7 +9,7 @@ from core.database import (
 )
 
 
-EVENT_COOLDOWN_SECONDS = 5
+EVENT_COOLDOWN_SECONDS = 10
 _recent_results = {}
 
 

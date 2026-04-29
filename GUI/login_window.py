@@ -6,8 +6,10 @@ from GUI.main_window import MainWindow
 class LoginWindow:
     def __init__(self, root):
         self.root = root
-        self.root.title("Вход в систему")
-        self.root.geometry("300x200")
+        w = root.winfo_screenwidth()//2 - 200
+        h = root.winfo_screenheight()//2 - 200
+        self.root.title("Авторизация")
+        self.root.geometry("300x200+{}+{}".format(w, h))
 
         tk.Label(root, text="Логин:").pack(pady=5)
         self.login_entry = tk.Entry(root)

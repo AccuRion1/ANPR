@@ -19,7 +19,7 @@ class EventsLogFrame:
             height=20
         )
         
-        self.tree.heading("#0", text="ID")
+        self.tree.heading("#0", text="№")
         self.tree.heading("Номер", text="Номер автомобиля")
         self.tree.heading("Камера", text="Камера")
         self.tree.heading("Направление", text="Направление")
@@ -49,5 +49,5 @@ class EventsLogFrame:
             self.tree.delete(item)
         
         events = get_access_events(limit=100)
-        for idx, event in enumerate(events):
-            self.tree.insert("", "end", text=str(idx+1), values=event)
+        for idx, event in enumerate(events, 1):
+            self.tree.insert("", "end", text=str(idx), values=event)

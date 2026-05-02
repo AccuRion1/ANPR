@@ -2,8 +2,15 @@ import cv2
 
 from core.YOLOmodel import detect_plates
 from core.OCR import recognize_plate
-#from core.preprocessing import straighten_plate
 from core.access_control import check_access
+
+
+def _to_display_status(decision):
+    if decision == "разрешен":
+        return "ALLOWED"
+    if decision == "запрещен":
+        return "DENIED"
+    return "UNREADABLE"
 
 
 def process_frame(
@@ -12,7 +19,18 @@ def process_frame(
     direction="въезд",
     realtime=False,
     max_plates=None,
+    return_details=False,
 ):
+    if frame is None:
+        empty_details = {
+            "plate_number": None,
+            "decision": None,
+            "display_status": "UNREADABLE",
+            "plate_crop": None,
+            "processed_plate": None,
+            "access_result": None,
+        }
+        return (None, None, empty_details) if return_details else (None, None)
 
     boxes = detect_plates(
         frame,
@@ -22,9 +40,16 @@ def process_frame(
 
     dark_frame = (frame * 0.35).astype("uint8")
     detected_plate = None
+    details = {
+        "plate_number": None,
+        "decision": None,
+        "display_status": "UNREADABLE",
+        "plate_crop": None,
+        "processed_plate": None,
+        "access_result": None,
+    }
 
     for (x1, y1, x2, y2) in boxes:
-
         frame_height, frame_width = frame.shape[:2]
         pad_x = max(10, int((x2 - x1) * 0.14))
         pad_y = max(6, int((y2 - y1) * 0.20))
@@ -35,20 +60,13 @@ def process_frame(
         crop_y2 = min(frame_height, y2 + pad_y)
 
         plate = frame[crop_y1:crop_y2, crop_x1:crop_x2]
+        if plate.size == 0:
+            continue
 
-        #plate = straighten_plate(plate)
-
-        # получаем и текст, и обработанное изображение
         plate_number, processed_plate = recognize_plate(plate, fast_mode=realtime)
-        
-        if not detected_plate and plate_number:
-            detected_plate = plate_number
 
-        # показать обработанный номер
-        #if processed_plate is not None:
-        #    cv2.imshow(f"Processed Plate", processed_plate)
-
-        status_text = "НЕ РАСПОЗНАН"
+        access_result = None
+        status_text = "не распознан"
         box_color = (0, 255, 255)
 
         if plate_number:
@@ -57,42 +75,51 @@ def process_frame(
                 camera_name=camera_name,
                 direction=direction,
             )
-            status_text = access_result["decision"]#.upper()
-            box_color = (0, 255, 0) if access_result["decision"] == "разрешен" else (0, 0, 255)
+            status_text = access_result["decision"]
+            box_color = (0, 255, 0) if status_text == "разрешен" else (0, 0, 255)
+            if detected_plate is None:
+                detected_plate = plate_number
 
         dark_frame[y1:y2, x1:x2] = frame[y1:y2, x1:x2]
-
         cv2.rectangle(dark_frame, (x1, y1), (x2, y2), box_color, 2)
 
-        display_status = status_text
         display_plate = plate_number or "UNREADABLE"
-
-        if status_text == "разрешен":
-            display_status = "ALLOWED"
-        elif status_text == "запрещен":
-            display_status = "DENIED"
+        display_status = _to_display_status(status_text)
 
         cv2.putText(
             dark_frame,
             display_plate,
-            (x1, y1-10),
+            (x1, max(25, y1 - 10)),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.9,
             box_color,
-            2
+            2,
         )
 
         cv2.putText(
             dark_frame,
             display_status,
-            (x1, y2 + 30),
+            (x1, min(frame_height - 10, y2 + 30)),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.8,
             box_color,
-            2
+            2,
         )
 
+        if details["plate_crop"] is None:
+            details = {
+                "plate_number": plate_number,
+                "decision": status_text if plate_number else None,
+                "display_status": display_status,
+                "plate_crop": plate.copy(),
+                "processed_plate": processed_plate.copy() if processed_plate is not None else None,
+                "access_result": access_result,
+            }
+
+    if return_details:
+        return dark_frame, detected_plate, details
     return dark_frame, detected_plate
+
 
 def handle_plate_number(plate_number, camera_name="Основная камера", direction="въезд"):
     if not plate_number:

@@ -1,16 +1,25 @@
 import time
 
 from core.database import (
-    add_vehicle_on_territory,
+    get_active_camera,
+    get_camera_by_name,
     get_registered_plate,
-    get_vehicle_on_territory,
-    remove_vehicle_from_territory,
     save_access_event,
+    update_plate_territory_state,
 )
 
 
 EVENT_COOLDOWN_SECONDS = 10
 _recent_results = {}
+
+
+def _normalize_direction(direction):
+    normalized = (direction or "въезд").strip().lower()
+    if normalized in {"entry", "in"}:
+        return "въезд"
+    if normalized in {"exit", "out"}:
+        return "выезд"
+    return normalized
 
 
 def _make_cache_key(plate_number, camera_name, direction):
@@ -42,20 +51,42 @@ def _remember_result(plate_number, camera_name, direction, result):
     }
 
 
-def _build_result(plate_number, decision, reason, owner_id=None, status=None, access_type=None):
+def _build_result(
+    plate_number,
+    decision,
+    reason,
+    owner_id=None,
+    owner_name=None,
+    status=None,
+    access_level=None,
+    on_territory=None,
+    camera_id=None,
+    camera_name=None,
+):
     return {
         "plate_number": plate_number,
         "decision": decision,
         "reason": reason,
         "owner_id": owner_id,
+        "owner_name": owner_name,
         "status": status,
-        "access_type": access_type,
+        "access_level": access_level,
+        "on_territory": on_territory,
+        "camera_id": camera_id,
+        "camera_name": camera_name,
     }
+
+
+def _resolve_camera(camera_name, direction):
+    camera = get_camera_by_name(camera_name) if camera_name else None
+    if camera is None:
+        camera = get_active_camera(direction)
+    return camera
 
 
 def check_access(plate_number, camera_name="Основная камера", direction="въезд"):
     plate_number = (plate_number or "").strip().upper()
-    direction = (direction or "въезд").strip().lower()
+    direction = _normalize_direction(direction)
     camera_name = (camera_name or "Основная камера").strip()
 
     if not plate_number:
@@ -64,8 +95,12 @@ def check_access(plate_number, camera_name="Основная камера", dire
             "decision": "запрещен",
             "reason": "номер не распознан",
             "owner_id": None,
+            "owner_name": None,
             "status": None,
-            "access_type": None,
+            "access_level": None,
+            "on_territory": None,
+            "camera_id": None,
+            "camera_name": camera_name,
             "event_logged": False,
             "is_duplicate": False,
         }
@@ -74,6 +109,10 @@ def check_access(plate_number, camera_name="Основная камера", dire
     if cached is not None:
         return cached
 
+    camera = _resolve_camera(camera_name, direction)
+    resolved_camera_name = camera["name"] if camera else camera_name
+    camera_id = camera["id"] if camera else None
+
     plate_record = get_registered_plate(plate_number)
 
     if plate_record is None:
@@ -81,92 +120,86 @@ def check_access(plate_number, camera_name="Основная камера", dire
             plate_number=plate_number,
             decision="запрещен",
             reason="номер не найден",
+            access_level="Неизвестен",
+            camera_id=camera_id,
+            camera_name=resolved_camera_name,
         )
     else:
-        status = (plate_record["status"] or "").strip().lower()
-        access_type = (plate_record["access_type"] or "").strip().lower()
-        owner_id = plate_record["owner_id"]
+        is_active = bool(plate_record["status"])
+        access_level = (plate_record["access_level"] or "").strip().lower()
+        on_territory = bool(plate_record["on_territory"])
 
-        if status != "активен":
-            result = _build_result(
-                plate_number=plate_number,
-                decision="запрещен",
-                reason=f"статус: {status or 'неактивен'}",
-                owner_id=owner_id,
-                status=plate_record["status"],
-                access_type=plate_record["access_type"],
-            )
-        elif access_type not in {"сотрудник", "гость"}:
-            result = _build_result(
-                plate_number=plate_number,
-                decision="запрещен",
-                reason=f"тип доступа: {access_type or 'запрещен'}",
-                owner_id=owner_id,
-                status=plate_record["status"],
-                access_type=plate_record["access_type"],
-            )
-        else:
-            vehicle_on_territory = get_vehicle_on_territory(plate_record["id"])
+        base_kwargs = {
+            "plate_number": plate_number,
+            "owner_id": plate_record["owner_id"],
+            "owner_name": plate_record["owner_name"],
+            "status": plate_record["status"],
+            "access_level": plate_record["access_level"],
+            "on_territory": plate_record["on_territory"],
+            "camera_id": camera_id,
+            "camera_name": resolved_camera_name,
+        }
 
-            if direction == "въезд":
-                if vehicle_on_territory is not None:
-                    result = _build_result(
-                        plate_number=plate_number,
-                        decision="запрещен",
-                        reason="автомобиль уже находится на территории",
-                        owner_id=owner_id,
-                        status=plate_record["status"],
-                        access_type=plate_record["access_type"],
-                    )
-                else:
-                    add_vehicle_on_territory(plate_record["id"])
-                    result = _build_result(
-                        plate_number=plate_number,
-                        decision="разрешен",
-                        reason="въезд разрешен",
-                        owner_id=owner_id,
-                        status=plate_record["status"],
-                        access_type=plate_record["access_type"],
-                    )
-            elif direction == "выезд":
-                if vehicle_on_territory is None:
-                    result = _build_result(
-                        plate_number=plate_number,
-                        decision="запрещен",
-                        reason="автомобиль отсутствует на территории",
-                        owner_id=owner_id,
-                        status=plate_record["status"],
-                        access_type=plate_record["access_type"],
-                    )
-                else:
-                    remove_vehicle_from_territory(plate_record["id"])
-                    result = _build_result(
-                        plate_number=plate_number,
-                        decision="разрешен",
-                        reason="выезд разрешен",
-                        owner_id=owner_id,
-                        status=plate_record["status"],
-                        access_type=plate_record["access_type"],
-                    )
-            else:
+        if not is_active:
+            result = _build_result(
+                decision="запрещен",
+                reason="статус неактивен",
+                **base_kwargs,
+            )
+        elif access_level not in {"сотрудник", "гость"}:
+            result = _build_result(
+                decision="запрещен",
+                reason="уровень доступа запрещен",
+                **base_kwargs,
+            )
+        elif direction == "въезд":
+            if on_territory:
                 result = _build_result(
-                    plate_number=plate_number,
                     decision="запрещен",
-                    reason="неизвестное направление",
-                    owner_id=owner_id,
-                    status=plate_record["status"],
-                    access_type=plate_record["access_type"],
+                    reason="автомобиль уже на территории",
+                    **base_kwargs,
                 )
+            else:
+                update_plate_territory_state(plate_record["id"], True)
+                allowed_kwargs = dict(base_kwargs)
+                allowed_kwargs["on_territory"] = True
+                result = _build_result(
+                    decision="разрешен",
+                    reason="въезд разрешен",
+                    **allowed_kwargs,
+                )
+        elif direction == "выезд":
+            if not on_territory:
+                result = _build_result(
+                    decision="запрещен",
+                    reason="автомобиль отсутствует на территории",
+                    **base_kwargs,
+                )
+            else:
+                update_plate_territory_state(plate_record["id"], False)
+                allowed_kwargs = dict(base_kwargs)
+                allowed_kwargs["on_territory"] = False
+                result = _build_result(
+                    decision="разрешен",
+                    reason="выезд разрешен",
+                    **allowed_kwargs,
+                )
+        else:
+            result = _build_result(
+                decision="запрещен",
+                reason="неизвестное направление",
+                **base_kwargs,
+            )
 
     save_access_event(
-        plate_number=result["plate_number"],
-        camera_name=camera_name,
+        plate_id=plate_record["id"] if plate_record else None,
+        camera_id=camera_id,
         direction=direction,
-        decision=result["decision"],
-        reason=result["reason"],
+        access_level=result["access_level"] or "Неизвестен",
+        access_granted=result["decision"] == "разрешен",
     )
 
     result["event_logged"] = True
     result["is_duplicate"] = False
-    _remember_result(plate_number, camera_name, direction, result)
+    _remember_result(plate_number, resolved_camera_name, direction, result)
     return result

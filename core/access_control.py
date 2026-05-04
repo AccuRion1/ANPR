@@ -5,8 +5,10 @@ from core.database import (
     get_camera_by_name,
     get_registered_plate,
     save_access_event,
+    save_incident,
     update_plate_territory_state,
 )
+from imitation.gate import get_gate_runtime_state
 
 
 EVENT_COOLDOWN_SECONDS = 10
@@ -62,6 +64,8 @@ def _build_result(
     on_territory=None,
     camera_id=None,
     camera_name=None,
+    event_id=None,
+    incident_description=None,
 ):
     return {
         "plate_number": plate_number,
@@ -74,6 +78,8 @@ def _build_result(
         "on_territory": on_territory,
         "camera_id": camera_id,
         "camera_name": camera_name,
+        "event_id": event_id,
+        "incident_description": incident_description,
     }
 
 
@@ -101,6 +107,8 @@ def check_access(plate_number, camera_name="Основная камера", dire
             "on_territory": None,
             "camera_id": None,
             "camera_name": camera_name,
+            "event_id": None,
+            "incident_description": None,
             "event_logged": False,
             "is_duplicate": False,
         }
@@ -114,6 +122,43 @@ def check_access(plate_number, camera_name="Основная камера", dire
     camera_id = camera["id"] if camera else None
 
     plate_record = get_registered_plate(plate_number)
+    gate_state = get_gate_runtime_state()
+
+    if gate_state["is_open"] and gate_state["authorized_plate"] and gate_state["authorized_plate"] != plate_number:
+        plate_id = plate_record["id"] if plate_record else None
+        access_level = plate_record["access_level"] if plate_record else "Неизвестен"
+        result = _build_result(
+            plate_number=plate_number,
+            decision="запрещен",
+            reason="шлагбаум уже открыт для другого автомобиля",
+            owner_id=plate_record["owner_id"] if plate_record else None,
+            owner_name=plate_record["owner_name"] if plate_record else None,
+            status=plate_record["status"] if plate_record else None,
+            access_level=access_level,
+            on_territory=plate_record["on_territory"] if plate_record else None,
+            camera_id=camera_id,
+            camera_name=resolved_camera_name,
+            incident_description="Несанкционированный проезд: второй автомобиль во время открытого шлагбаума",
+        )
+        event_id = save_access_event(
+            plate_number=plate_number,
+            plate_id=plate_id,
+            camera_id=camera_id,
+            direction=direction,
+            access_level=result["access_level"] or "Неизвестен",
+            access_granted=False,
+        )
+        result["event_id"] = event_id
+        save_incident(
+            plate_number=plate_number,
+            event_id=event_id,
+            camera_id=camera_id,
+            description=result["incident_description"],
+        )
+        result["event_logged"] = True
+        result["is_duplicate"] = False
+        _remember_result(plate_number, resolved_camera_name, direction, result)
+        return result
 
     if plate_record is None:
         result = _build_result(
@@ -124,6 +169,7 @@ def check_access(plate_number, camera_name="Основная камера", dire
             camera_id=camera_id,
             camera_name=resolved_camera_name,
         )
+        plate_id = None
     else:
         is_active = bool(plate_record["status"])
         access_level = (plate_record["access_level"] or "").strip().lower()
@@ -139,6 +185,7 @@ def check_access(plate_number, camera_name="Основная камера", dire
             "camera_id": camera_id,
             "camera_name": resolved_camera_name,
         }
+        plate_id = plate_record["id"]
 
         if not is_active:
             result = _build_result(
@@ -157,10 +204,11 @@ def check_access(plate_number, camera_name="Основная камера", dire
                 result = _build_result(
                     decision="запрещен",
                     reason="автомобиль уже на территории",
+                    incident_description="Попытка повторного въезда автомобиля, который уже находится на территории",
                     **base_kwargs,
                 )
             else:
-                update_plate_territory_state(plate_record["id"], True)
+                update_plate_territory_state(plate_id, True)
                 allowed_kwargs = dict(base_kwargs)
                 allowed_kwargs["on_territory"] = True
                 result = _build_result(
@@ -173,10 +221,11 @@ def check_access(plate_number, camera_name="Основная камера", dire
                 result = _build_result(
                     decision="запрещен",
                     reason="автомобиль отсутствует на территории",
+                    incident_description="Попытка выезда автомобиля, который не числится на территории",
                     **base_kwargs,
                 )
             else:
-                update_plate_territory_state(plate_record["id"], False)
+                update_plate_territory_state(plate_id, False)
                 allowed_kwargs = dict(base_kwargs)
                 allowed_kwargs["on_territory"] = False
                 result = _build_result(
@@ -191,13 +240,23 @@ def check_access(plate_number, camera_name="Основная камера", dire
                 **base_kwargs,
             )
 
-    save_access_event(
-        plate_id=plate_record["id"] if plate_record else None,
+    event_id = save_access_event(
+        plate_number=plate_number,
+        plate_id=plate_id,
         camera_id=camera_id,
         direction=direction,
         access_level=result["access_level"] or "Неизвестен",
         access_granted=result["decision"] == "разрешен",
     )
+    result["event_id"] = event_id
+
+    if result.get("incident_description"):
+        save_incident(
+            plate_number=plate_number,
+            event_id=event_id,
+            camera_id=camera_id,
+            description=result["incident_description"],
+        )
 
     result["event_logged"] = True
     result["is_duplicate"] = False

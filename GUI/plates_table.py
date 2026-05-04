@@ -5,6 +5,7 @@ from core.database import (
     add_plate,
     delete_plate,
     get_all_plates_with_owners,
+    get_employees_for_select,
     get_plate_by_number,
     update_plate,
 )
@@ -61,7 +62,7 @@ class PlatesTableFrame:
         self.tree.heading("territory", text="На территории")
 
         self.tree.column("plate", width=120, anchor="center")
-        self.tree.column("owner", width=220, anchor="w")
+        self.tree.column("owner", width=260, anchor="w")
         self.tree.column("status", width=120, anchor="center")
         self.tree.column("access", width=150, anchor="center")
         self.tree.column("territory", width=120, anchor="center")
@@ -99,19 +100,29 @@ class PlatesTableFrame:
 
     def _open_plate_dialog(self, title, initial_data=None):
         is_edit = initial_data is not None
+        employees = get_employees_for_select()
+        employee_names = ["Не выбран"] + [employee["full_name"] for employee in employees]
+        employee_name_to_id = {employee["full_name"]: employee["id"] for employee in employees}
+        employee_id_to_name = {employee["id"]: employee["full_name"] for employee in employees}
 
         window = tk.Toplevel(self.frame)
         window.title(title)
-        window.geometry("420x360")
+        window.geometry("460x390")
         window.resizable(False, False)
 
         tk.Label(window, text="Номер ТС:").pack(pady=(12, 4))
         plate_entry = tk.Entry(window)
         plate_entry.pack(pady=4, fill="x", padx=20)
 
-        tk.Label(window, text="Владелец (ID сотрудника):").pack(pady=(8, 4))
-        owner_entry = tk.Entry(window)
-        owner_entry.pack(pady=4, fill="x", padx=20)
+        tk.Label(window, text="Сотрудник:").pack(pady=(8, 4))
+        owner_var = tk.StringVar(value="Не выбран")
+        owner_combo = ttk.Combobox(
+            window,
+            textvariable=owner_var,
+            values=employee_names,
+            state="readonly",
+        )
+        owner_combo.pack(pady=4, fill="x", padx=20)
 
         tk.Label(window, text="Статус:").pack(pady=(8, 4))
         status_var = tk.StringVar(value="Активен")
@@ -128,7 +139,7 @@ class PlatesTableFrame:
             window,
             textvariable=access_var,
             values=["Сотрудник", "Гость"],
-            state="normal",
+            state="readonly",
         ).pack(pady=4, fill="x", padx=20)
 
         tk.Label(window, text="На территории:").pack(pady=(8, 4))
@@ -142,30 +153,25 @@ class PlatesTableFrame:
 
         if initial_data:
             plate_entry.insert(0, initial_data["plate_number"])
-            owner_entry.insert(0, str(initial_data["owner_id"]) if initial_data["owner_id"] else "")
+            owner_var.set(employee_id_to_name.get(initial_data["owner_id"], "Не выбран"))
             status_var.set("Активен" if initial_data["status"] else "Неактивен")
             access_var.set(initial_data["access_level"] or "Сотрудник")
             territory_var.set("Да" if initial_data["on_territory"] else "Нет")
 
         def save():
             plate_number = plate_entry.get().strip().upper()
-            owner_raw = owner_entry.get().strip()
             access_level = access_var.get().strip()
+            owner_name = owner_var.get().strip()
 
             if not plate_number:
                 messagebox.showerror("Ошибка", "Введите номер ТС.")
                 return
 
             if not access_level:
-                messagebox.showerror("Ошибка", "Введите уровень доступа.")
+                messagebox.showerror("Ошибка", "Выберите уровень доступа.")
                 return
 
-            try:
-                owner_id = int(owner_raw) if owner_raw else None
-            except ValueError:
-                messagebox.showerror("Ошибка", "ID владельца должен быть числом.")
-                return
-
+            owner_id = employee_name_to_id.get(owner_name) if owner_name != "Не выбран" else None
             status = _status_to_bool(status_var.get())
             on_territory = _territory_to_bool(territory_var.get())
 

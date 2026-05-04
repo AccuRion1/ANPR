@@ -1,7 +1,7 @@
 import cv2
 
-from core.YOLOmodel import detect_plates
 from core.OCR import recognize_plate
+from core.YOLOmodel import detect_plates
 from core.access_control import check_access
 
 
@@ -13,6 +13,17 @@ def _to_display_status(decision):
     return "UNREADABLE"
 
 
+def _box_in_roi(box, roi):
+    if roi is None:
+        return True
+
+    rx1, ry1, rx2, ry2 = roi
+    x1, y1, x2, y2 = box
+    center_x = (x1 + x2) // 2
+    center_y = (y1 + y2) // 2
+    return rx1 <= center_x <= rx2 and ry1 <= center_y <= ry2
+
+
 def process_frame(
     frame,
     camera_name="Основная камера",
@@ -20,6 +31,7 @@ def process_frame(
     realtime=False,
     max_plates=None,
     return_details=False,
+    roi=None,
 ):
     if frame is None:
         empty_details = {
@@ -29,6 +41,7 @@ def process_frame(
             "plate_crop": None,
             "processed_plate": None,
             "access_result": None,
+            "roi": roi,
         }
         return (None, None, empty_details) if return_details else (None, None)
 
@@ -37,6 +50,7 @@ def process_frame(
         max_plates=max_plates if max_plates is not None else (1 if realtime else None),
         realtime=realtime,
     )
+    boxes = [box for box in boxes if _box_in_roi(box, roi)]
 
     dark_frame = (frame * 0.35).astype("uint8")
     detected_plate = None
@@ -47,7 +61,21 @@ def process_frame(
         "plate_crop": None,
         "processed_plate": None,
         "access_result": None,
+        "roi": roi,
     }
+
+    if roi is not None:
+        rx1, ry1, rx2, ry2 = roi
+        cv2.rectangle(dark_frame, (rx1, ry1), (rx2, ry2), (255, 255, 0), 2)
+        cv2.putText(
+            dark_frame,
+            "ROI",
+            (rx1, max(25, ry1 - 8)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 0),
+            2,
+        )
 
     for (x1, y1, x2, y2) in boxes:
         frame_height, frame_width = frame.shape[:2]
@@ -114,6 +142,7 @@ def process_frame(
                 "plate_crop": plate.copy(),
                 "processed_plate": processed_plate.copy() if processed_plate is not None else None,
                 "access_result": access_result,
+                "roi": roi,
             }
 
     if return_details:

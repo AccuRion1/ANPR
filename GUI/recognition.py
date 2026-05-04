@@ -68,6 +68,8 @@ class _BaseMonitorFrame:
         self._latest_details = None
         self._status_text = "Ожидание запуска"
         self._last_processed_at = 0.0
+        self._roi = None
+        self._static_mode = False
 
         self.gate = GateSimulator(open_seconds=10, on_state_change=self._on_gate_state_changed)
 
@@ -92,6 +94,7 @@ class _BaseMonitorFrame:
         self.decision_value = tk.Label(right_panel, anchor="w", justify="left", font=("Arial", 12, "bold"))
         self.status_value = tk.Label(right_panel, anchor="w", justify="left", wraplength=280)
         self.gate_value = tk.Label(right_panel, anchor="w", justify="left", font=("Arial", 12, "bold"))
+        self.roi_value = tk.Label(right_panel, anchor="w", justify="left", wraplength=280)
 
         tk.Label(right_panel, text="Камера:", anchor="w").pack(fill="x", padx=10, pady=(10, 0))
         self.camera_value.pack(fill="x", padx=10)
@@ -105,6 +108,8 @@ class _BaseMonitorFrame:
         self.status_value.pack(fill="x", padx=10)
         tk.Label(right_panel, text="Шлагбаум:", anchor="w").pack(fill="x", padx=10, pady=(8, 0))
         self.gate_value.pack(fill="x", padx=10)
+        tk.Label(right_panel, text="Зона распознавания:", anchor="w").pack(fill="x", padx=10, pady=(8, 0))
+        self.roi_value.pack(fill="x", padx=10)
 
         crop_frame = tk.LabelFrame(right_panel, text="Фрагмент номера")
         crop_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -124,6 +129,40 @@ class _BaseMonitorFrame:
         if self.frame.winfo_exists():
             self.frame.after(0, lambda: self.gate_value.config(text=state))
 
+    def _format_roi_text(self):
+        if self._roi is None:
+            return "Не выбрана"
+        x1, y1, x2, y2 = self._roi
+        return f"x1={x1}, y1={y1}, x2={x2}, y2={y2}"
+
+    def select_roi(self):
+        with self._lock:
+            frame = self._latest_raw_frame.copy() if self._latest_raw_frame is not None else None
+
+        if frame is None:
+            messagebox.showinfo("Зона распознавания", "Сначала запустите наблюдение или загрузите изображение.")
+            return
+
+        roi = cv2.selectROI("Выберите зону распознавания", frame, showCrosshair=True, fromCenter=False)
+        cv2.destroyWindow("Выберите зону распознавания")
+
+        x, y, w, h = roi
+        if w <= 0 or h <= 0:
+            self._set_status("Выбор зоны отменен.")
+            return
+
+        self._roi = (int(x), int(y), int(x + w), int(y + h))
+        self._set_status("Зона распознавания обновлена.")
+
+        if self._static_mode:
+            self._reprocess_static_frame()
+
+    def clear_roi(self):
+        self._roi = None
+        self._set_status("Зона распознавания сброшена.")
+        if self._static_mode:
+            self._reprocess_static_frame()
+
     def start_stream(self, source_value, source_kind, camera_name, direction):
         self.stop_stream()
         self._source_value = source_value
@@ -135,6 +174,7 @@ class _BaseMonitorFrame:
         self._latest_display_frame = None
         self._latest_details = None
         self._last_processed_at = 0.0
+        self._static_mode = False
         self._set_status("Подключение к источнику...")
 
         self._capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
@@ -149,26 +189,33 @@ class _BaseMonitorFrame:
             messagebox.showerror("Ошибка", "Не удалось открыть изображение.")
             return
 
+        self._camera_name = camera_name
+        self._direction = direction
+        self._latest_raw_frame = image
+        self._static_mode = True
+        self._set_status(f"Изображение: {os.path.basename(file_path)}")
+        self._reprocess_static_frame()
+
+    def _reprocess_static_frame(self):
+        if self._latest_raw_frame is None:
+            return
+
         frame, _, details = process_frame(
-            image,
-            camera_name=camera_name,
-            direction=direction,
+            self._latest_raw_frame.copy(),
+            camera_name=self._camera_name,
+            direction=self._direction,
             realtime=False,
             max_plates=1,
             return_details=True,
+            roi=self._roi,
         )
 
-        with self._lock:
-            self._camera_name = camera_name
-            self._direction = direction
-            self._latest_raw_frame = image
-            self._latest_display_frame = frame
-            self._latest_details = details
-            self._status_text = f"Изображение: {os.path.basename(file_path)}"
+        self._latest_display_frame = frame
+        self._latest_details = details
 
         access_result = details.get("access_result") if details else None
         if access_result and access_result.get("decision") == "разрешен" and not access_result.get("is_duplicate"):
-            self.gate.request_open()
+            self.gate.request_open(authorized_plate=details.get("plate_number"))
 
     def stop_stream(self):
         self._video_running = False
@@ -253,11 +300,12 @@ class _BaseMonitorFrame:
                 realtime=True,
                 max_plates=1,
                 return_details=True,
+                roi=self._roi,
             )
 
             access_result = details.get("access_result") if details else None
             if access_result and access_result.get("decision") == "разрешен" and not access_result.get("is_duplicate"):
-                self.gate.request_open()
+                self.gate.request_open(authorized_plate=details.get("plate_number"))
 
             with self._lock:
                 self._latest_display_frame = processed_frame
@@ -291,6 +339,8 @@ class _BaseMonitorFrame:
                 access_result = details.get("access_result")
                 if access_result:
                     decision_text = _pretty_decision(access_result.get("decision"))
+                    if access_result.get("incident_description"):
+                        status_text = f"{status_text}\nИнцидент: {access_result['incident_description']}"
                 crop_frame = details.get("plate_crop")
 
             self.camera_value.config(text=camera_name or "Не указана")
@@ -302,6 +352,7 @@ class _BaseMonitorFrame:
             )
             self.status_value.config(text=status_text)
             self.gate_value.config(text=self.gate.get_state())
+            self.roi_value.config(text=self._format_roi_text())
 
             if crop_frame is not None and crop_frame.size:
                 crop_image = _frame_to_tk(crop_frame, (260, 120))
@@ -321,7 +372,9 @@ class RecognitionFrame(_BaseMonitorFrame):
 
     def build_controls(self, parent):
         tk.Button(parent, text="Переподключить поток", command=self.start_observation).pack(side=tk.LEFT, padx=5)
-        tk.Button(parent, text="Открыть шлагбаум", command=self.gate.request_open).pack(side=tk.LEFT, padx=5)
+        tk.Button(parent, text="Выбрать зону", command=self.select_roi).pack(side=tk.LEFT, padx=5)
+        tk.Button(parent, text="Сбросить зону", command=self.clear_roi).pack(side=tk.LEFT, padx=5)
+        tk.Button(parent, text="Открыть шлагбаум", command=lambda: self.gate.request_open()).pack(side=tk.LEFT, padx=5)
 
     def start_observation(self):
         camera = get_active_camera()
@@ -346,7 +399,9 @@ class LoadFrame(_BaseMonitorFrame):
     def build_controls(self, parent):
         tk.Button(parent, text="Загрузить изображение", command=self.select_image).pack(side=tk.LEFT, padx=5)
         tk.Button(parent, text="Загрузить видео", command=self.select_video).pack(side=tk.LEFT, padx=5)
-        tk.Button(parent, text="Открыть шлагбаум", command=self.gate.request_open).pack(side=tk.LEFT, padx=5)
+        tk.Button(parent, text="Выбрать зону", command=self.select_roi).pack(side=tk.LEFT, padx=5)
+        tk.Button(parent, text="Сбросить зону", command=self.clear_roi).pack(side=tk.LEFT, padx=5)
+        tk.Button(parent, text="Открыть шлагбаум", command=lambda: self.gate.request_open()).pack(side=tk.LEFT, padx=5)
 
     def select_image(self):
         file_path = filedialog.askopenfilename(filetypes=[("Image files", "*.jpg *.jpeg *.png *.bmp")])

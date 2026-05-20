@@ -2,13 +2,14 @@ import os
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
 import cv2
 from PIL import Image, ImageTk
 
-from core.database import get_active_camera
+from core.database import get_active_camera, get_active_cameras
 from core.pipeline import process_frame
+from core.plate_recognizer import get_ocr_backend
 from imitation.gate import GateSimulator
 
 
@@ -62,9 +63,11 @@ class _BaseMonitorFrame:
         self._source_value = None
         self._camera_name = "Источник"
         self._direction = "въезд"
-        self._process_interval = 0.4
+        self._process_interval = 0.12 if get_ocr_backend() == "crnn" else 0.35
         self._latest_raw_frame = None
+        self._latest_raw_timestamp = 0.0
         self._latest_display_frame = None
+        self._latest_display_timestamp = 0.0
         self._latest_details = None
         self._status_text = "Ожидание запуска"
         self._last_processed_at = 0.0
@@ -85,11 +88,12 @@ class _BaseMonitorFrame:
         self.image_label = tk.Label(left_panel, bg="#202020")
         self.image_label.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
 
-        right_panel = tk.LabelFrame(self.frame, text="Распознавание")
+        right_panel = tk.LabelFrame(self.frame, text="Инфопанель")
         right_panel.grid(row=1, column=1, sticky="nsew", padx=(5, 10), pady=10)
 
         self.camera_value = tk.Label(right_panel, anchor="w", justify="left", font=("Arial", 11))
         self.direction_value = tk.Label(right_panel, anchor="w", justify="left", font=("Arial", 11))
+        self.backend_value = tk.Label(right_panel, anchor="w", justify="left", font=("Arial", 11))
         self.plate_value = tk.Label(right_panel, anchor="w", justify="left", font=("Arial", 18, "bold"), fg="#0a58ca")
         self.decision_value = tk.Label(right_panel, anchor="w", justify="left", font=("Arial", 12, "bold"))
         self.status_value = tk.Label(right_panel, anchor="w", justify="left", wraplength=280)
@@ -100,6 +104,8 @@ class _BaseMonitorFrame:
         self.camera_value.pack(fill="x", padx=10)
         tk.Label(right_panel, text="Направление:", anchor="w").pack(fill="x", padx=10, pady=(8, 0))
         self.direction_value.pack(fill="x", padx=10)
+        #tk.Label(right_panel, text="OCR:", anchor="w").pack(fill="x", padx=10, pady=(8, 0))
+        #self.backend_value.pack(fill="x", padx=10)
         tk.Label(right_panel, text="Номер:", anchor="w").pack(fill="x", padx=10, pady=(8, 0))
         self.plate_value.pack(fill="x", padx=10)
         tk.Label(right_panel, text="Решение:", anchor="w").pack(fill="x", padx=10, pady=(8, 0))
@@ -171,10 +177,13 @@ class _BaseMonitorFrame:
         self._direction = (direction or "въезд").strip().lower()
         self._video_running = True
         self._latest_raw_frame = None
+        self._latest_raw_timestamp = 0.0
         self._latest_display_frame = None
+        self._latest_display_timestamp = 0.0
         self._latest_details = None
         self._last_processed_at = 0.0
         self._static_mode = False
+        self._process_interval = 0.12 if get_ocr_backend() == "crnn" else 0.35
         self._set_status("Подключение к источнику...")
 
         self._capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
@@ -192,6 +201,7 @@ class _BaseMonitorFrame:
         self._camera_name = camera_name
         self._direction = direction
         self._latest_raw_frame = image
+        self._latest_raw_timestamp = time.perf_counter()
         self._static_mode = True
         self._set_status(f"Изображение: {os.path.basename(file_path)}")
         self._reprocess_static_frame()
@@ -211,6 +221,7 @@ class _BaseMonitorFrame:
         )
 
         self._latest_display_frame = frame
+        self._latest_display_timestamp = time.perf_counter()
         self._latest_details = details
 
         access_result = details.get("access_result") if details else None
@@ -271,6 +282,7 @@ class _BaseMonitorFrame:
             frame = _resize_for_realtime(frame)
             with self._lock:
                 self._latest_raw_frame = frame.copy()
+                self._latest_raw_timestamp = time.perf_counter()
 
         if self._cap is not None:
             self._cap.release()
@@ -284,12 +296,12 @@ class _BaseMonitorFrame:
                     snapshot = self._latest_raw_frame.copy()
 
             if snapshot is None:
-                time.sleep(0.03)
+                time.sleep(0.02)
                 continue
 
             now = time.perf_counter()
             if now - self._last_processed_at < self._process_interval:
-                time.sleep(0.01)
+                time.sleep(0.005)
                 continue
 
             self._last_processed_at = now
@@ -309,6 +321,7 @@ class _BaseMonitorFrame:
 
             with self._lock:
                 self._latest_display_frame = processed_frame
+                self._latest_display_timestamp = time.perf_counter()
                 self._latest_details = details
 
     def _refresh_ui(self):
@@ -316,12 +329,17 @@ class _BaseMonitorFrame:
             with self._lock:
                 display_frame = self._latest_display_frame.copy() if self._latest_display_frame is not None else None
                 raw_frame = self._latest_raw_frame.copy() if self._latest_raw_frame is not None else None
+                raw_ts = self._latest_raw_timestamp
+                display_ts = self._latest_display_timestamp
                 details = dict(self._latest_details) if self._latest_details else None
                 status_text = self._status_text
                 camera_name = self._camera_name
                 direction = self._direction
 
-            frame_to_show = display_frame if display_frame is not None else raw_frame
+            frame_to_show = display_frame
+            if raw_frame is not None and (frame_to_show is None or (raw_ts - display_ts) > 0.2):
+                frame_to_show = raw_frame
+
             if frame_to_show is not None:
                 video_image = _frame_to_tk(frame_to_show, (900, 620))
                 self.image_label.config(image=video_image, text="")
@@ -345,6 +363,7 @@ class _BaseMonitorFrame:
 
             self.camera_value.config(text=camera_name or "Не указана")
             self.direction_value.config(text=(direction or "не задан").capitalize())
+            self.backend_value.config(text=get_ocr_backend().upper())
             self.plate_value.config(text=plate_text)
             self.decision_value.config(
                 text=decision_text,
@@ -354,7 +373,7 @@ class _BaseMonitorFrame:
             self.gate_value.config(text=self.gate.get_state())
             self.roi_value.config(text=self._format_roi_text())
 
-            if crop_frame is not None and crop_frame.size:
+            if crop_frame is not None and getattr(crop_frame, "size", 0):
                 crop_image = _frame_to_tk(crop_frame, (260, 120))
                 self.crop_label.config(image=crop_image, text="")
                 self.crop_label.image = crop_image
@@ -362,29 +381,53 @@ class _BaseMonitorFrame:
                 self.crop_label.config(image="", text="Нет данных")
                 self.crop_label.image = None
 
-            self.frame.after(50, self._refresh_ui)
+            self.frame.after(40, self._refresh_ui)
 
 
 class RecognitionFrame(_BaseMonitorFrame):
     def __init__(self, parent):
+        self._camera_lookup = {}
+        self.camera_var = tk.StringVar()
         super().__init__(parent)
+        self.refresh_camera_list()
         self.start_observation()
 
     def build_controls(self, parent):
-        tk.Button(parent, text="Переподключить поток", command=self.start_observation).pack(side=tk.LEFT, padx=5)
+        tk.Label(parent, text="Камера:").pack(side=tk.LEFT, padx=(0, 5))
+        self.camera_combo = ttk.Combobox(parent, textvariable=self.camera_var, state="readonly", width=26)
+        self.camera_combo.pack(side=tk.LEFT, padx=(0, 8))
+        tk.Button(parent, text="Подключить", command=self.start_observation).pack(side=tk.LEFT, padx=5)
+        tk.Button(parent, text="Обновить камеры", command=self.refresh_camera_list).pack(side=tk.LEFT, padx=5)
         tk.Button(parent, text="Выбрать зону", command=self.select_roi).pack(side=tk.LEFT, padx=5)
         tk.Button(parent, text="Сбросить зону", command=self.clear_roi).pack(side=tk.LEFT, padx=5)
         tk.Button(parent, text="Открыть шлагбаум", command=lambda: self.gate.request_open()).pack(side=tk.LEFT, padx=5)
 
+    def refresh_camera_list(self):
+        cameras = get_active_cameras()
+        self._camera_lookup = {camera["name"]: camera for camera in cameras}
+        names = list(self._camera_lookup.keys())
+        self.camera_combo["values"] = names
+        if names and not self.camera_var.get():
+            self.camera_var.set(names[0])
+
     def start_observation(self):
-        camera = get_active_camera()
+        if not getattr(self, "camera_combo", None):
+            return
+
+        selected_name = self.camera_var.get().strip()
+        camera = self._camera_lookup.get(selected_name) if selected_name else None
+        if camera is None:
+            camera = get_active_camera()
+            if camera:
+                self.camera_var.set(camera.get("name", ""))
+
         if camera is None:
             self._set_status("В таблице cameras нет активной камеры.")
             return
 
         camera_url = camera.get("url")
         if not camera_url:
-            self._set_status("У активной камеры не заполнен URL.")
+            self._set_status("У выбранной камеры не заполнен URL.")
             return
 
         self.start_stream(

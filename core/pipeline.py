@@ -1,8 +1,9 @@
 import cv2
 
-from core.OCR import recognize_plate
-from core.YOLOmodel import detect_plates
 from core.access_control import check_access
+from core.OCR import PLATE_PATTERN
+from core.plate_recognizer import get_ocr_backend, recognize_plate
+from core.YOLOmodel import detect_plates
 
 
 def _to_display_status(decision):
@@ -33,6 +34,17 @@ def process_frame(
     return_details=False,
     roi=None,
 ):
+    def build_operator_alert(plate_number, access_result, plate_found):
+        if not plate_found:
+            return "Требуется проверка оператором: номерной знак не обнаружен."
+        if not plate_number:
+            return "Требуется проверка оператором: номер не распознан или не соответствует формату."
+        if not PLATE_PATTERN.fullmatch(plate_number):
+            return "Требуется проверка оператором: распознанный номер не соответствует формату."
+        if access_result and access_result.get("reason") == "РЅРѕРјРµСЂ РЅРµ РЅР°Р№РґРµРЅ":
+            return "Требуется проверка оператором: номер отсутствует в базе данных."
+        return ""
+
     if frame is None:
         empty_details = {
             "plate_number": None,
@@ -41,7 +53,9 @@ def process_frame(
             "plate_crop": None,
             "processed_plate": None,
             "access_result": None,
+            "operator_alert": "Требуется проверка оператором: кадр не получен.",
             "roi": roi,
+            "ocr_backend": get_ocr_backend(),
         }
         return (None, None, empty_details) if return_details else (None, None)
 
@@ -52,7 +66,7 @@ def process_frame(
     )
     boxes = [box for box in boxes if _box_in_roi(box, roi)]
 
-    dark_frame = (frame * 0.35).astype("uint8")
+    display_frame = frame.copy() if realtime else (frame * 0.35).astype("uint8")
     detected_plate = None
     details = {
         "plate_number": None,
@@ -61,14 +75,16 @@ def process_frame(
         "plate_crop": None,
         "processed_plate": None,
         "access_result": None,
+        "operator_alert": "",
         "roi": roi,
+        "ocr_backend": get_ocr_backend(),
     }
 
     if roi is not None:
         rx1, ry1, rx2, ry2 = roi
-        cv2.rectangle(dark_frame, (rx1, ry1), (rx2, ry2), (255, 255, 0), 2)
+        cv2.rectangle(display_frame, (rx1, ry1), (rx2, ry2), (255, 255, 0), 2)
         cv2.putText(
-            dark_frame,
+            display_frame,
             "ROI",
             (rx1, max(25, ry1 - 8)),
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -108,14 +124,15 @@ def process_frame(
             if detected_plate is None:
                 detected_plate = plate_number
 
-        dark_frame[y1:y2, x1:x2] = frame[y1:y2, x1:x2]
-        cv2.rectangle(dark_frame, (x1, y1), (x2, y2), box_color, 2)
+        if not realtime:
+            display_frame[y1:y2, x1:x2] = frame[y1:y2, x1:x2]
+        cv2.rectangle(display_frame, (x1, y1), (x2, y2), box_color, 2)
 
         display_plate = plate_number or "UNREADABLE"
         display_status = _to_display_status(status_text)
 
         cv2.putText(
-            dark_frame,
+            display_frame,
             display_plate,
             (x1, max(25, y1 - 10)),
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -125,7 +142,7 @@ def process_frame(
         )
 
         cv2.putText(
-            dark_frame,
+            display_frame,
             display_status,
             (x1, min(frame_height - 10, y2 + 30)),
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -142,12 +159,17 @@ def process_frame(
                 "plate_crop": plate.copy(),
                 "processed_plate": processed_plate.copy() if processed_plate is not None else None,
                 "access_result": access_result,
+                "operator_alert": build_operator_alert(plate_number, access_result, True),
                 "roi": roi,
+                "ocr_backend": get_ocr_backend(),
             }
 
+    if details["plate_crop"] is None:
+        details["operator_alert"] = build_operator_alert(None, None, False)
+
     if return_details:
-        return dark_frame, detected_plate, details
-    return dark_frame, detected_plate
+        return display_frame, detected_plate, details
+    return display_frame, detected_plate
 
 
 def handle_plate_number(plate_number, camera_name="Основная камера", direction="въезд"):

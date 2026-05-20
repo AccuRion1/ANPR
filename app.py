@@ -1,7 +1,9 @@
-import tkinter as tk
-from GUI.login_window import LoginWindow
+import sys
+from PyQt5.QtWidgets import QApplication
+from GUI.qt_login_window import QtLoginWindow
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    LoginWindow(root)
-    root.mainloop()
+    app = QApplication(sys.argv)
+    login_window = QtLoginWindow()
+    login_window.show()
+    sys.exit(app.exec_())
